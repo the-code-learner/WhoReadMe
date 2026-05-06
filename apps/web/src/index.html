@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Who Read Me</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <h1>Who Read Me</h1>
+          <p>Self-hosted Gmail tracking and tracker detection on Cloudflare.</p>
+        </div>
+        <button id="loginButton" type="button">Sign in with Google</button>
+      </header>
+
+      <section class="panel">
+        <h2>Deployment</h2>
+        <dl>
+          <div>
+            <dt>Status</dt>
+            <dd id="statusText">Checking session...</dd>
+          </div>
+          <div>
+            <dt>API origin</dt>
+            <dd><input id="apiOriginInput" type="url" value="http://localhost:8787"></dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="panel">
+        <div class="sectionHeader">
+          <h2>Extension Pairing</h2>
+          <button id="pairButton" type="button">Create token</button>
+        </div>
+        <pre id="pairingOutput">Pair the extension after signing in.</pre>
+      </section>
+
+      <section class="panel">
+        <h2>Message Lookup</h2>
+        <form id="summaryForm">
+          <input id="messageIdInput" placeholder="msg_..." autocomplete="off">
+          <button type="submit">Load summary</button>
+        </form>
+        <div id="summaryOutput" class="summaryGrid"></div>
+      </section>
+    </main>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
+

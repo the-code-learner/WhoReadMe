@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Who Read Me",
+  "version": "0.1.0",
+  "description": "Track Gmail read events and detect trackers in received email.",
+  "permissions": ["storage", "activeTab", "scripting"],
+  "host_permissions": ["https://mail.google.com/*", "http://localhost:8787/*", "https://*/*"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://mail.google.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "Who Read Me",
+    "default_popup": "popup.html"
+  }
+}
+

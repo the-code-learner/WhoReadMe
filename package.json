@@ -1,0 +1,32 @@
+{
+  "name": "who-read-me",
+  "version": "0.1.0",
+  "private": true,
+  "license": "SEE LICENSE IN LICENSE.md",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build:shared && npm run build:api && npm run build:extension && npm run build:web",
+    "build:api": "npm run build --workspace @who-read-me/api",
+    "build:extension": "npm run build --workspace @who-read-me/extension",
+    "build:shared": "npm run build --workspace @who-read-me/shared",
+    "build:web": "npm run build --workspace @who-read-me/web",
+    "test": "npm run test:shared && npm run test:api && npm run test:extension",
+    "test:api": "npm run test --workspace @who-read-me/api",
+    "test:extension": "npm run test --workspace @who-read-me/extension",
+    "test:shared": "npm run test --workspace @who-read-me/shared",
+    "deploy:api": "npm run deploy --workspace @who-read-me/api",
+    "dev:api": "npm run dev --workspace @who-read-me/api",
+    "dev:web": "npm run dev --workspace @who-read-me/web"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260423.0",
+    "esbuild": "^0.25.3",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.2",
+    "wrangler": "^4.13.2"
+  }
+}

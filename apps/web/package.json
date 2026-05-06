@@ -1,0 +1,11 @@
+{
+  "name": "@who-read-me/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "npx wrangler pages dev dist --port 4173"
+  }
+}
+

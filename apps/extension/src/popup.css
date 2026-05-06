@@ -1,0 +1,48 @@
+body {
+  width: 320px;
+  margin: 0;
+  color: #16202a;
+  font: 14px system-ui, sans-serif;
+}
+
+main {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+h1 {
+  font-size: 18px;
+  margin: 0;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  font-weight: 700;
+}
+
+input,
+textarea {
+  border: 1px solid #d9e0e8;
+  border-radius: 6px;
+  font: inherit;
+  padding: 8px;
+}
+
+button {
+  border: 0;
+  border-radius: 6px;
+  background: #0f766e;
+  color: white;
+  cursor: pointer;
+  font-weight: 700;
+  padding: 9px 12px;
+}
+
+p {
+  min-height: 20px;
+  margin: 0;
+  color: #5f6b7a;
+}
+

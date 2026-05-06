@@ -1,0 +1,30 @@
+name = "who-read-me-api"
+main = "src/index.ts"
+compatibility_date = "2026-04-23"
+
+[vars]
+APP_ORIGIN = "http://localhost:4173"
+API_ORIGIN = "http://localhost:8787"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "who-read-me"
+database_id = "replace-with-d1-database-id"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "ARTIFACTS"
+bucket_name = "who-read-me-artifacts"
+
+[[queues.producers]]
+binding = "EVENT_QUEUE"
+queue = "who-read-me-events"
+
+[[queues.consumers]]
+queue = "who-read-me-events"
+max_batch_size = 10
+max_batch_timeout = 5
+
+[ai]
+binding = "AI"
+

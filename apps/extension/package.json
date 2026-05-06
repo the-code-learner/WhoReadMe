@@ -1,0 +1,13 @@
+{
+  "name": "@who-read-me/extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node -e \"console.log('extension tests pending')\""
+  },
+  "dependencies": {
+    "@who-read-me/shared": "0.1.0"
+  }
+}
