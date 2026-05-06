@@ -33,6 +33,7 @@ export interface PrepareMessageRequest {
   subject?: string;
   senderEmail: string;
   gmailDraftId?: string;
+  clientComposeId?: string;
   recipients: Array<{ email: string; displayName?: string }>;
   links: string[];
 }
@@ -41,6 +42,43 @@ export interface PrepareMessageResponse {
   messageId: string;
   recipients: Array<{ id: string; email: string; displayName?: string; pixelUrl: string }>;
   links: Array<{ id: string; originalUrl: string; trackedUrl: string }>;
+}
+
+export interface SendTrackedEmailRequest {
+  clientComposeId: string;
+  subject?: string;
+  html: string;
+  text?: string;
+  senderEmail: string;
+  recipients: Array<{ email: string; displayName?: string }>;
+}
+
+export interface SendTrackedEmailResponse {
+  sent: Array<{
+    messageId: string;
+    gmailMessageId?: string;
+    recipient: { id: string; email: string; displayName?: string };
+  }>;
+}
+
+export interface MessageListItem {
+  id: string;
+  subject?: string;
+  senderEmail: string;
+  status: string;
+  createdAt: string;
+  recipientCount: number;
+  totalOpens: number;
+  totalClicks: number;
+  lastEventAt?: string;
+}
+
+export interface DashboardStats {
+  messages: number;
+  recipients: number;
+  opens: number;
+  clicks: number;
+  detectedTrackers: number;
 }
 
 const encoder = new TextEncoder();
@@ -147,4 +185,3 @@ function timingSafeEqual(left: string, right: string): boolean {
   }
   return result === 0;
 }
-

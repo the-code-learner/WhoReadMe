@@ -26,10 +26,10 @@ Open tracking does not prove that a human read an email. Common distortions incl
 - Security bots and link prefetchers.
 - Remote image blocking.
 - Forwarded emails.
+- Individualized tracked sends, which may create one Gmail sent message per recipient.
 
 Dashboard labels should use careful language such as "open event" and "likely read" where appropriate.
 
 ## Retention
 
 Retention should be configurable per deployment. The first scaffold stores events indefinitely until retention workflows are implemented.
-

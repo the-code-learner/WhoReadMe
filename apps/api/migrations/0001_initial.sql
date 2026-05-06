@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS users (
   email TEXT NOT NULL,
   name TEXT,
   avatar_url TEXT,
+  gmail_refresh_token TEXT,
   role TEXT NOT NULL DEFAULT 'owner',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -29,8 +30,10 @@ CREATE TABLE IF NOT EXISTS messages (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   gmail_message_id TEXT,
+  client_compose_id TEXT,
   subject TEXT,
   sender_email TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'draft',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -68,6 +71,8 @@ CREATE TABLE IF NOT EXISTS tracking_events (
 
 CREATE INDEX IF NOT EXISTS idx_tracking_events_message ON tracking_events(message_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_tracking_events_recipient ON tracking_events(recipient_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_messages_user_created ON messages(user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_messages_client_compose ON messages(client_compose_id);
 
 CREATE TABLE IF NOT EXISTS detection_results (
   id TEXT PRIMARY KEY,
@@ -83,4 +88,3 @@ CREATE TABLE IF NOT EXISTS settings (
   value_json TEXT NOT NULL,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-

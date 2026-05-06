@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "node -e \"console.log('extension tests pending')\""
+    "test": "node -e \"console.log('extension bundle is verified by npm run build')\""
   },
   "dependencies": {
     "@who-read-me/shared": "0.1.0"

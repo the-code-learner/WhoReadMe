@@ -30,12 +30,28 @@
         </dl>
       </section>
 
+      <section class="metrics" id="metricsGrid">
+        <article><strong>0</strong><span>Messages</span></article>
+        <article><strong>0</strong><span>Recipients</span></article>
+        <article><strong>0</strong><span>Opens</span></article>
+        <article><strong>0</strong><span>Clicks</span></article>
+        <article><strong>0</strong><span>Tracker warnings</span></article>
+      </section>
+
       <section class="panel">
         <div class="sectionHeader">
           <h2>Extension Pairing</h2>
           <button id="pairButton" type="button">Create token</button>
         </div>
         <pre id="pairingOutput">Pair the extension after signing in.</pre>
+      </section>
+
+      <section class="panel">
+        <div class="sectionHeader">
+          <h2>Tracked Messages</h2>
+          <button id="refreshButton" type="button">Refresh</button>
+        </div>
+        <div id="messagesOutput" class="messageList"></div>
       </section>
 
       <section class="panel">
@@ -50,4 +66,3 @@
     <script src="/app.js" type="module"></script>
   </body>
 </html>
-

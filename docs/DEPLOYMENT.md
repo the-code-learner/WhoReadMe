@@ -23,7 +23,16 @@ npx wrangler secret put GOOGLE_CLIENT_SECRET --config apps/api/wrangler.toml
 npx wrangler secret put SESSION_SECRET --config apps/api/wrangler.toml
 ```
 
-`SESSION_SECRET` protects dashboard sessions, signed tracking URLs, and extension tokens.
+`SESSION_SECRET` protects dashboard sessions, signed tracking URLs, extension tokens, and encrypted Google refresh tokens.
+
+The OAuth consent screen must include these scopes:
+
+- `openid`
+- `email`
+- `profile`
+- `https://www.googleapis.com/auth/gmail.send`
+
+Gmail send permission is required because accurate per-recipient open attribution requires individualized tracked sends.
 
 ## Cloudflare Resources
 
@@ -60,4 +69,3 @@ npm run build:extension
 ```
 
 Load `apps/extension/dist` in Chrome at `chrome://extensions` with Developer Mode enabled.
-

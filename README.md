@@ -16,12 +16,17 @@ This repository contains the first working scaffold:
 
 ## Features
 
+- Send individualized tracked Gmail copies so per-recipient read attribution is meaningful.
 - Track email opens per message and recipient with signed tracking pixels.
 - Track link clicks with signed redirect URLs.
 - Show read count and recipient-level reader status in Gmail.
 - Detect likely trackers in received Gmail messages.
 - Use Google OAuth as the single identity system.
 - Keep each deployment autonomous and owned by the first Google account that completes setup.
+
+## How Tracking Works
+
+Who Read Me does not try to identify recipients from one multi-recipient email. That would be inaccurate because every recipient would receive the same tracking markup. Instead, the extension sends one copy per recipient through Gmail API. Each copy has its own signed pixel and recipient-specific tracked links.
 
 ## Quick Start
 
@@ -47,7 +52,14 @@ This repository contains the first working scaffold:
 
 4. Copy the generated resource IDs into `apps/api/wrangler.toml`.
 
-5. Create Google OAuth credentials for a web application and set these Worker secrets:
+5. Create Google OAuth credentials for a web application. Enable Gmail API and include these OAuth scopes:
+
+   - `openid`
+   - `email`
+   - `profile`
+   - `https://www.googleapis.com/auth/gmail.send`
+
+6. Set these Worker secrets:
 
    ```bash
    npx wrangler secret put GOOGLE_CLIENT_ID --config apps/api/wrangler.toml
@@ -55,20 +67,22 @@ This repository contains the first working scaffold:
    npx wrangler secret put SESSION_SECRET --config apps/api/wrangler.toml
    ```
 
-6. Apply D1 migrations:
+7. Apply D1 migrations:
 
    ```bash
    npx wrangler d1 migrations apply who-read-me --config apps/api/wrangler.toml
    ```
 
-7. Deploy the API Worker and dashboard:
+8. Deploy the API Worker and dashboard:
 
    ```bash
    npm run deploy:api
    npm run build:web
    ```
 
-8. Load `apps/extension/dist` as an unpacked Chrome extension.
+9. Load `apps/extension/dist` as an unpacked Chrome extension.
+
+10. Sign in to the dashboard, create an extension token, paste it into the extension popup, and set your sender email.
 
 ## Deployment Model
 
@@ -87,4 +101,3 @@ See [Privacy](docs/PRIVACY.md) for details.
 Who Read Me is distributed under the [Who Read Me Custom License](LICENSE.md). Non-commercial use is allowed. Commercial use is reserved by the copyright holder and requires prior written permission.
 
 This is not an OSI open-source license because it restricts commercial use.
-

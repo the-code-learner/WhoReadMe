@@ -7,7 +7,7 @@
     "build": "tsc --noEmit",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "test": "node -e \"console.log('api tests pending')\""
+    "test": "tsc --noEmit"
   },
   "dependencies": {
     "@who-read-me/shared": "0.1.0"

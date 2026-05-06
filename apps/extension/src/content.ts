@@ -1,8 +1,10 @@
-import { detectTrackers, type MessageReadSummary, type PrepareMessageResponse } from "@who-read-me/shared";
+import { detectTrackers, type MessageListItem, type MessageReadSummary, type SendTrackedEmailResponse } from "@who-read-me/shared";
 
 const marker = "data-wrm-instrumented";
 
 setInterval(scanGmail, 1500);
+setInterval(refreshPanel, 10000);
+void refreshPanel();
 
 function scanGmail() {
   scanComposeWindows();
@@ -17,44 +19,48 @@ function scanComposeWindows() {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "wrm-compose-button";
-    button.textContent = "Track with Who Read Me";
-    button.addEventListener("click", () => void instrumentCompose(body, button));
+    button.textContent = "Send tracked copies";
+    button.addEventListener("click", () => void sendTrackedCopies(body, button));
     body.parentElement?.append(button);
   }
 }
 
-async function instrumentCompose(body: HTMLElement, button: HTMLButtonElement) {
+async function sendTrackedCopies(body: HTMLElement, button: HTMLButtonElement) {
   button.disabled = true;
-  button.textContent = "Preparing tracking...";
-  const recipients = collectRecipients();
-  const links = Array.from(body.querySelectorAll<HTMLAnchorElement>("a[href]")).map((link) => link.href);
-  const response = await api<PrepareMessageResponse>("/api/messages/prepare", {
-    method: "POST",
-    body: JSON.stringify({
-      subject: document.querySelector<HTMLInputElement>('input[name="subjectbox"]')?.value ?? undefined,
-      senderEmail: "gmail-user",
-      recipients,
-      links
-    })
-  });
-
-  for (const link of body.querySelectorAll<HTMLAnchorElement>("a[href]")) {
-    const tracked = response.links.find((item) => item.originalUrl === link.href);
-    if (tracked) link.href = tracked.trackedUrl;
+  button.textContent = "Sending tracked copies...";
+  try {
+    const composeRoot = findComposeRoot(body);
+    const recipients = collectRecipients(composeRoot);
+    if (!recipients.length) {
+      button.textContent = "Add at least one recipient";
+      button.disabled = false;
+      return;
+    }
+    const senderEmail = await getSenderEmail();
+    const response = await api<SendTrackedEmailResponse>("/api/gmail/send-tracked", {
+      method: "POST",
+      body: JSON.stringify({
+        clientComposeId: crypto.randomUUID(),
+        subject: composeRoot?.querySelector<HTMLInputElement>('input[name="subjectbox"]')?.value ?? document.querySelector<HTMLInputElement>('input[name="subjectbox"]')?.value ?? undefined,
+        senderEmail,
+        html: body.innerHTML,
+        text: body.innerText,
+        recipients
+      })
+    });
+    if ("error" in response) {
+      button.textContent = String((response as { error: string }).error);
+      button.disabled = false;
+      return;
+    }
+    button.textContent = `Sent ${response.sent.length} tracked copies`;
+    button.dataset.messageId = response.sent[0]?.messageId;
+    await chrome.storage.local.set({ wrmLastSent: response.sent });
+    void refreshPanel();
+  } catch (error) {
+    button.textContent = "Who Read Me send failed";
+    button.disabled = false;
   }
-
-  for (const recipient of response.recipients) {
-    const img = document.createElement("img");
-    img.src = recipient.pixelUrl;
-    img.width = 1;
-    img.height = 1;
-    img.alt = "";
-    img.style.cssText = "display:none;width:1px;height:1px;";
-    body.append(img);
-  }
-
-  button.textContent = `Tracking ${response.recipients.length} recipients`;
-  button.dataset.messageId = response.messageId;
 }
 
 function scanReceivedMessages() {
@@ -88,8 +94,46 @@ async function renderSummaryNear(anchor: HTMLElement, messageId: string) {
   anchor.after(badge);
 }
 
-function collectRecipients(): Array<{ email: string; displayName?: string }> {
-  const chips = Array.from(document.querySelectorAll<HTMLElement>("[email], [data-hovercard-id]"));
+async function refreshPanel() {
+  if (!location.hostname.includes("mail.google.com")) return;
+  let panel = document.querySelector<HTMLElement>("#wrm-panel");
+  if (!panel) {
+    panel = document.createElement("aside");
+    panel.id = "wrm-panel";
+    panel.innerHTML = '<div class="wrm-panel-title">Who Read Me</div><div class="wrm-panel-body">Loading...</div>';
+    document.body.append(panel);
+  }
+  const body = panel.querySelector<HTMLElement>(".wrm-panel-body");
+  if (!body) return;
+  try {
+    const response = await api<{ messages: MessageListItem[] }>("/api/messages");
+    const messages = response.messages ?? [];
+    if (!messages.length) {
+      body.textContent = "No tracked messages yet.";
+      return;
+    }
+    const summaries = await Promise.all(messages.slice(0, 5).map((message) => api<MessageReadSummary>(`/api/messages/${message.id}/summary`)));
+    body.innerHTML = "";
+    for (const [index, message] of messages.slice(0, 5).entries()) {
+      const summary = summaries[index];
+      const readers = summary.recipients.filter((recipient) => Number(recipient.openCount) > 0);
+      const item = document.createElement("article");
+      item.className = "wrm-panel-item";
+      item.innerHTML = `
+        <strong>${escapeHtml(message.subject || "No subject")}</strong>
+        <span>${Number(message.totalOpens)} opens, ${Number(message.totalClicks)} clicks</span>
+        <small>${readers.length ? escapeHtml(readers.map((reader) => `${reader.email} (${reader.openCount})`).join(", ")) : "No recipient opens yet"}</small>
+      `;
+      body.append(item);
+    }
+  } catch {
+    body.textContent = "Pair the extension from the dashboard.";
+  }
+}
+
+function collectRecipients(root: HTMLElement | null): Array<{ email: string; displayName?: string }> {
+  const scope = root ?? document;
+  const chips = Array.from(scope.querySelectorAll<HTMLElement>("[email], [data-hovercard-id]"));
   const emails = new Set<string>();
   for (const chip of chips) {
     const value = chip.getAttribute("email") ?? chip.getAttribute("data-hovercard-id");
@@ -100,6 +144,28 @@ function collectRecipients(): Array<{ email: string; displayName?: string }> {
 
 function api<T>(path: string, init?: RequestInit): Promise<T> {
   return chrome.runtime.sendMessage({ type: "WRM_API", path, init });
+}
+
+function findComposeRoot(body: HTMLElement): HTMLElement | null {
+  return body.closest<HTMLElement>('div[role="dialog"], div[aria-label*="Message Body"]') ?? body.parentElement;
+}
+
+async function getSenderEmail(): Promise<string> {
+  const settings = await chrome.storage.sync.get(["senderEmail"]);
+  if (settings.senderEmail) return String(settings.senderEmail);
+  const account = document.querySelector<HTMLElement>("[email], [data-email]");
+  const found = account?.getAttribute("email") ?? account?.getAttribute("data-email");
+  return found && found.includes("@") ? found : "me";
+}
+
+function escapeHtml(value: unknown): string {
+  return String(value).replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#039;"
+  })[char] ?? char);
 }
 
 const style = document.createElement("style");
@@ -129,6 +195,41 @@ style.textContent = `
     border-color: #f59e0b;
     background: #fff7ed;
   }
+  #wrm-panel {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 999999;
+    width: 320px;
+    max-height: 46vh;
+    overflow: auto;
+    border: 1px solid #d9e0e8;
+    border-radius: 8px;
+    background: #ffffff;
+    box-shadow: 0 12px 36px rgba(15, 23, 42, 0.18);
+    color: #16202a;
+    font: 12px Arial, sans-serif;
+  }
+  .wrm-panel-title {
+    border-bottom: 1px solid #d9e0e8;
+    font-weight: 700;
+    padding: 10px 12px;
+  }
+  .wrm-panel-body {
+    display: grid;
+    gap: 8px;
+    padding: 10px;
+  }
+  .wrm-panel-item {
+    display: grid;
+    gap: 4px;
+    border: 1px solid #edf1f5;
+    border-radius: 6px;
+    padding: 8px;
+  }
+  .wrm-panel-item span,
+  .wrm-panel-item small {
+    color: #5f6b7a;
+  }
 `;
 document.documentElement.append(style);
-

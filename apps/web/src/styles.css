@@ -60,6 +60,30 @@ dd {
   margin-bottom: 16px;
 }
 
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.metrics article {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.metrics strong {
+  display: block;
+  font-size: 28px;
+}
+
+.metrics span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .sectionHeader,
 form,
 dl div {
@@ -121,6 +145,37 @@ pre {
   margin-top: 16px;
 }
 
+.messageList {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.messageRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  border: 1px solid var(--line);
+  background: #ffffff;
+  color: var(--text);
+  text-align: left;
+}
+
+.messageRow:hover {
+  background: #f2f7f6;
+}
+
+.messageRow span {
+  display: grid;
+  gap: 3px;
+}
+
+.messageRow small {
+  color: var(--muted);
+}
+
 .summaryCard {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -135,5 +190,13 @@ pre {
     align-items: stretch;
     flex-direction: column;
   }
-}
 
+  .metrics {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .messageRow {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

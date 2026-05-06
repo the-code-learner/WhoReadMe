@@ -1,9 +1,13 @@
 import {
   createId,
   detectTrackers,
+  type DashboardStats,
   type MessageReadSummary,
+  type MessageListItem,
   type PrepareMessageRequest,
   type PrepareMessageResponse,
+  type SendTrackedEmailRequest,
+  type SendTrackedEmailResponse,
   hmacSign,
   signedQuery,
   verifyHmac,
@@ -53,8 +57,11 @@ export default {
     if (!auth) return json({ error: "Authentication required" }, env, 401);
 
     if (url.pathname === "/api/me") return json({ user: auth.user }, env);
+    if (url.pathname === "/api/dashboard/stats") return dashboardStats(env, auth.user.id);
+    if (url.pathname === "/api/messages") return listMessages(env, auth.user.id);
     if (url.pathname === "/api/extension/pair" && request.method === "POST") return pairExtension(request, env, auth.user.id);
     if (url.pathname === "/api/messages/prepare" && request.method === "POST") return prepareMessage(request, env, auth.user.id);
+    if (url.pathname === "/api/gmail/send-tracked" && request.method === "POST") return sendTrackedEmail(request, env, auth.user.id);
     if (url.pathname.startsWith("/api/messages/") && url.pathname.endsWith("/summary")) return messageSummary(url, env, auth.user.id);
     if (url.pathname === "/api/detect" && request.method === "POST") return detectReceivedTrackers(request, env, auth.user.id);
 
@@ -79,7 +86,7 @@ async function startGoogleAuth(url: URL, env: Env): Promise<Response> {
     client_id: env.GOOGLE_CLIENT_ID,
     redirect_uri: `${env.API_ORIGIN}/auth/google/callback`,
     response_type: "code",
-    scope: "openid email profile",
+    scope: "openid email profile https://www.googleapis.com/auth/gmail.send",
     state: state.toString(),
     access_type: "offline",
     prompt: "consent"
@@ -107,7 +114,7 @@ async function finishGoogleAuth(request: Request, env: Env): Promise<Response> {
     })
   });
   if (!tokenResponse.ok) return json({ error: "Google token exchange failed" }, env, 502);
-  const token = await tokenResponse.json<{ id_token: string }>();
+  const token = await tokenResponse.json<{ id_token: string; refresh_token?: string }>();
   const profile = parseJwt<{ sub: string; email: string; name?: string; picture?: string }>(token.id_token);
 
   const existingOwner = await env.DB.prepare("SELECT id, google_sub FROM users WHERE role = 'owner' LIMIT 1").first<{ id: string; google_sub: string }>();
@@ -115,8 +122,15 @@ async function finishGoogleAuth(request: Request, env: Env): Promise<Response> {
 
   const userId = existingOwner?.id ?? createId("usr");
   await env.DB.prepare(
-    "INSERT INTO users (id, google_sub, email, name, avatar_url, role) VALUES (?, ?, ?, ?, ?, 'owner') ON CONFLICT(google_sub) DO UPDATE SET email = excluded.email, name = excluded.name, avatar_url = excluded.avatar_url, updated_at = CURRENT_TIMESTAMP"
-  ).bind(userId, profile.sub, profile.email, profile.name ?? null, profile.picture ?? null).run();
+    `INSERT INTO users (id, google_sub, email, name, avatar_url, gmail_refresh_token, role)
+    VALUES (?, ?, ?, ?, ?, ?, 'owner')
+    ON CONFLICT(google_sub) DO UPDATE SET
+      email = excluded.email,
+      name = excluded.name,
+      avatar_url = excluded.avatar_url,
+      gmail_refresh_token = COALESCE(excluded.gmail_refresh_token, users.gmail_refresh_token),
+      updated_at = CURRENT_TIMESTAMP`
+  ).bind(userId, profile.sub, profile.email, profile.name ?? null, profile.picture ?? null, token.refresh_token ? await encryptSecret(env, token.refresh_token) : null).run();
 
   const sessionId = createId("ses");
   const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString();
@@ -173,6 +187,56 @@ async function prepareMessage(request: Request, env: Env, userId: string): Promi
   return json({ messageId, recipients, links }, env);
 }
 
+async function sendTrackedEmail(request: Request, env: Env, userId: string): Promise<Response> {
+  const body = await request.json<SendTrackedEmailRequest>();
+  if (!body.recipients.length) return json({ error: "At least one recipient is required" }, env, 400);
+  if (!body.html.trim()) return json({ error: "Email body is required" }, env, 400);
+
+  const accessToken = await getGmailAccessToken(env, userId);
+  if (!accessToken) return json({ error: "Gmail is not linked. Sign in again with Google consent." }, env, 409);
+
+  const sent: SendTrackedEmailResponse["sent"] = [];
+  for (const recipient of body.recipients) {
+    const messageId = createId("msg");
+    const recipientId = createId("rec");
+    await env.DB.prepare(
+      "INSERT INTO messages (id, user_id, client_compose_id, subject, sender_email, status) VALUES (?, ?, ?, ?, ?, 'sending')"
+    ).bind(messageId, userId, body.clientComposeId, body.subject ?? null, body.senderEmail).run();
+    await env.DB.prepare("INSERT INTO recipients (id, message_id, email, display_name) VALUES (?, ?, ?, ?)")
+      .bind(recipientId, messageId, recipient.email, recipient.displayName ?? null)
+      .run();
+
+    const html = await buildTrackedHtml(body.html, env, messageId, recipientId);
+    const raw = createMimeMessage({
+      from: body.senderEmail,
+      to: recipient.email,
+      subject: body.subject ?? "",
+      html,
+      text: body.text ?? stripHtml(html)
+    });
+    const gmailResponse = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ raw })
+    });
+    if (!gmailResponse.ok) {
+      await env.DB.prepare("UPDATE messages SET status = 'failed' WHERE id = ?").bind(messageId).run();
+      const error = await gmailResponse.text();
+      return json({ error: "Gmail send failed", detail: error }, env, 502);
+    }
+    const gmailMessage = await gmailResponse.json<{ id?: string }>();
+    await env.DB.prepare("UPDATE messages SET status = 'sent', gmail_message_id = ? WHERE id = ?")
+      .bind(gmailMessage.id ?? null, messageId)
+      .run();
+    sent.push({ messageId, gmailMessageId: gmailMessage.id, recipient: { id: recipientId, ...recipient } });
+  }
+
+  return json({ sent }, env);
+}
+
 async function trackOpen(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   if (await verifySignedQuery(env.SESSION_SECRET, url.searchParams)) {
@@ -198,6 +262,7 @@ async function trackClick(request: Request, env: Env): Promise<Response> {
     eventId: createId("evt"),
     eventType: "click",
     messageId: required(url, "messageId"),
+    recipientId: url.searchParams.get("recipientId") ?? undefined,
     linkId: required(url, "linkId")
   });
   return Response.redirect(required(url, "url"), 302);
@@ -227,6 +292,38 @@ async function messageSummary(url: URL, env: Env, userId: string): Promise<Respo
   return json(summary, env);
 }
 
+async function listMessages(env: Env, userId: string): Promise<Response> {
+  const rows = await env.DB.prepare(
+    `SELECT
+      m.id,
+      m.subject,
+      m.sender_email senderEmail,
+      m.status,
+      m.created_at createdAt,
+      (SELECT COUNT(*) FROM recipients r WHERE r.message_id = m.id) recipientCount,
+      (SELECT COUNT(*) FROM tracking_events e WHERE e.message_id = m.id AND e.event_type = 'open') totalOpens,
+      (SELECT COUNT(*) FROM tracking_events e WHERE e.message_id = m.id AND e.event_type = 'click') totalClicks,
+      (SELECT MAX(e.created_at) FROM tracking_events e WHERE e.message_id = m.id) lastEventAt
+    FROM messages m
+    WHERE m.user_id = ?
+    ORDER BY m.created_at DESC
+    LIMIT 100`
+  ).bind(userId).all<MessageListItem>();
+  return json({ messages: rows.results ?? [] }, env);
+}
+
+async function dashboardStats(env: Env, userId: string): Promise<Response> {
+  const stats = await env.DB.prepare(
+    `SELECT
+      (SELECT COUNT(*) FROM messages WHERE user_id = ?) messages,
+      (SELECT COUNT(*) FROM recipients r JOIN messages m ON m.id = r.message_id WHERE m.user_id = ?) recipients,
+      (SELECT COUNT(*) FROM tracking_events WHERE user_id = ? AND event_type = 'open') opens,
+      (SELECT COUNT(*) FROM tracking_events WHERE user_id = ? AND event_type = 'click') clicks,
+      (SELECT COUNT(*) FROM detection_results WHERE user_id = ? AND risk_level != 'none') detectedTrackers`
+  ).bind(userId, userId, userId, userId, userId).first<DashboardStats>();
+  return json(stats ?? { messages: 0, recipients: 0, opens: 0, clicks: 0, detectedTrackers: 0 }, env);
+}
+
 async function detectReceivedTrackers(request: Request, env: Env, userId: string): Promise<Response> {
   const body = await request.json<{ html: string; gmailMessageId?: string }>();
   const result = detectTrackers(body.html);
@@ -238,14 +335,19 @@ async function detectReceivedTrackers(request: Request, env: Env, userId: string
 
 async function enqueueEvent(request: Request, env: Env, event: Pick<QueuedTrackingEvent, "eventId" | "eventType" | "messageId" | "recipientId" | "linkId">): Promise<void> {
   const userAgent = request.headers.get("user-agent") ?? undefined;
-  await env.EVENT_QUEUE.send({
+  const queued = {
     ...event,
     userAgent,
     referrer: request.headers.get("referer") ?? undefined,
     country: request.cf?.country as string | undefined,
     colo: request.cf?.colo as string | undefined,
     isBot: /bot|crawler|spider|scanner|preview|proxy|fetch/i.test(userAgent ?? "")
-  });
+  };
+  try {
+    await env.EVENT_QUEUE.send(queued);
+  } catch {
+    await persistTrackingEvent(queued, env);
+  }
 }
 
 async function persistTrackingEvent(event: QueuedTrackingEvent, env: Env): Promise<void> {
@@ -338,4 +440,123 @@ function logout(env: Env): Response {
       ...corsHeaders(env)
     }
   });
+}
+
+async function buildTrackedHtml(html: string, env: Env, messageId: string, recipientId: string): Promise<string> {
+  const rewritten = await rewriteLinks(html, env, messageId, recipientId);
+  const pixelQuery = await signedQuery(env.SESSION_SECRET, { messageId, recipientId });
+  const pixelUrl = `${env.API_ORIGIN}/track/open.gif?${pixelQuery}`;
+  return `${rewritten}<img src="${escapeAttribute(pixelUrl)}" width="1" height="1" alt="" style="display:none;width:1px;height:1px;">`;
+}
+
+async function rewriteLinks(html: string, env: Env, messageId: string, recipientId: string): Promise<string> {
+  const matches = Array.from(html.matchAll(/href=(["'])(https?:\/\/[^"']+)\1/gi));
+  let rewritten = html;
+  for (const match of matches) {
+    const originalUrl = match[2];
+    const linkId = createId("lnk");
+    await env.DB.prepare("INSERT INTO tracked_links (id, message_id, recipient_id, original_url) VALUES (?, ?, ?, ?)")
+      .bind(linkId, messageId, recipientId, originalUrl)
+      .run();
+    const query = await signedQuery(env.SESSION_SECRET, { messageId, recipientId, linkId, url: originalUrl });
+    const trackedUrl = `${env.API_ORIGIN}/track/click?${query}`;
+    rewritten = rewritten.replace(originalUrl, escapeAttribute(trackedUrl));
+  }
+  return rewritten;
+}
+
+async function getGmailAccessToken(env: Env, userId: string): Promise<string | null> {
+  const user = await env.DB.prepare("SELECT gmail_refresh_token FROM users WHERE id = ?").bind(userId).first<{ gmail_refresh_token?: string }>();
+  if (!user?.gmail_refresh_token) return null;
+  const refreshToken = await decryptSecret(env, user.gmail_refresh_token);
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: env.GOOGLE_CLIENT_ID,
+      client_secret: env.GOOGLE_CLIENT_SECRET,
+      refresh_token: refreshToken,
+      grant_type: "refresh_token"
+    })
+  });
+  if (!response.ok) return null;
+  const token = await response.json<{ access_token: string }>();
+  return token.access_token;
+}
+
+async function encryptSecret(env: Env, value: string): Promise<string> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await aesKey(env);
+  const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(value));
+  return `${base64Url(iv)}.${base64Url(new Uint8Array(encrypted))}`;
+}
+
+async function decryptSecret(env: Env, value: string): Promise<string> {
+  const [ivText, encryptedText] = value.split(".");
+  const key = await aesKey(env);
+  const iv = Uint8Array.from(fromBase64Url(ivText));
+  const encrypted = Uint8Array.from(fromBase64Url(encryptedText));
+  const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, encrypted);
+  return new TextDecoder().decode(decrypted);
+}
+
+async function aesKey(env: Env): Promise<CryptoKey> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(env.SESSION_SECRET));
+  return crypto.subtle.importKey("raw", digest, "AES-GCM", false, ["encrypt", "decrypt"]);
+}
+
+function createMimeMessage(input: { from: string; to: string; subject: string; html: string; text: string }): string {
+  const boundary = `wrm_${crypto.randomUUID()}`;
+  const message = [
+    `From: ${input.from}`,
+    `To: ${input.to}`,
+    `Subject: ${encodeHeader(input.subject)}`,
+    "MIME-Version: 1.0",
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    "",
+    `--${boundary}`,
+    "Content-Type: text/plain; charset=UTF-8",
+    "Content-Transfer-Encoding: base64",
+    "",
+    base64(new TextEncoder().encode(input.text)),
+    "",
+    `--${boundary}`,
+    "Content-Type: text/html; charset=UTF-8",
+    "Content-Transfer-Encoding: base64",
+    "",
+    base64(new TextEncoder().encode(input.html)),
+    "",
+    `--${boundary}--`
+  ].join("\r\n");
+  return base64Url(new TextEncoder().encode(message));
+}
+
+function encodeHeader(value: string): string {
+  if (/^[\x00-\x7F]*$/.test(value)) return value;
+  return `=?UTF-8?B?${base64(new TextEncoder().encode(value))}?=`;
+}
+
+function stripHtml(html: string): string {
+  return html.replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function escapeAttribute(value: string): string {
+  return value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");
+}
+
+function base64Url(bytes: Uint8Array): string {
+  return base64(bytes).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+}
+
+function base64(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function fromBase64Url(value: string): Uint8Array {
+  const normalized = value.replaceAll("-", "+").replaceAll("_", "/");
+  const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), "=");
+  const binary = atob(padded);
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
 }
