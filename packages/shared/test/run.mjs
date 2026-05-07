@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { detectTrackers, signedQuery, verifySignedQuery } from "../dist/index.js";
+import { classifyEventActor, detectTrackers, signedQuery, verifySignedQuery } from "../dist/index.js";
 
 const query = await signedQuery("secret", { messageId: "msg_1", recipientId: "rec_1" });
 assert.equal(await verifySignedQuery("secret", query), true);
@@ -11,5 +11,11 @@ const result = detectTrackers('<img src="https://example.com/open.gif" width="1"
 assert.equal(result.riskLevel, "medium");
 assert.equal(result.findings.length, 2);
 
-console.log("shared tests passed");
+const proxy = classifyEventActor("Mozilla/5.0 GoogleImageProxy");
+assert.equal(proxy.isBot, true);
+assert.equal(proxy.confidence, "high");
 
+const human = classifyEventActor("Mozilla/5.0 Chrome/124 Safari/537.36");
+assert.equal(human.isBot, false);
+
+console.log("shared tests passed");

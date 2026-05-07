@@ -81,6 +81,25 @@ export interface DashboardStats {
   detectedTrackers: number;
 }
 
+export interface ExtensionPairing {
+  id: string;
+  label: string;
+  createdAt: string;
+  revokedAt?: string;
+}
+
+export interface ProductSettings {
+  retentionDays: number;
+  dedupeWindowMinutes: number;
+  trackerWarningsEnabled: boolean;
+}
+
+export interface EventActorClassification {
+  isBot: boolean;
+  confidence: "low" | "medium" | "high";
+  reason: string;
+}
+
 const encoder = new TextEncoder();
 
 export function createId(prefix: string): string {
@@ -164,6 +183,35 @@ export function detectTrackers(html: string): TrackerDetectionResult {
     riskLevel: findings.length >= 5 ? "high" : findings.length >= 2 ? "medium" : findings.length === 1 ? "low" : "none",
     findings
   };
+}
+
+export function classifyEventActor(userAgent = "", referrer = ""): EventActorClassification {
+  const normalized = `${userAgent} ${referrer}`.toLowerCase();
+  const highSignals = [
+    "googleimageproxy",
+    "google web preview",
+    "microsoft office existence discovery",
+    "proofpoint",
+    "mimecast",
+    "barracuda",
+    "mailprotector",
+    "urlscan",
+    "virustotal",
+    "crawler",
+    "spider",
+    "bot"
+  ];
+  const mediumSignals = ["proxy", "scanner", "preview", "prefetch", "fetch", "safe links", "safelinks"];
+  if (highSignals.some((signal) => normalized.includes(signal))) {
+    return { isBot: true, confidence: "high", reason: "User agent or referrer matches a known proxy, scanner, or bot signal." };
+  }
+  if (mediumSignals.some((signal) => normalized.includes(signal))) {
+    return { isBot: true, confidence: "medium", reason: "User agent or referrer contains a generic proxy, scanner, or prefetch signal." };
+  }
+  if (!userAgent.trim()) {
+    return { isBot: true, confidence: "low", reason: "Missing user agent is suspicious for a tracking event." };
+  }
+  return { isBot: false, confidence: "low", reason: "No known automated access signals were detected." };
 }
 
 function getAttribute(tag: string, name: string): string | undefined {

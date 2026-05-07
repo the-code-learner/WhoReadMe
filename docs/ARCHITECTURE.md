@@ -6,7 +6,7 @@ Who Read Me is a personal deployment. The owner deploys the repo to Cloudflare, 
 
 - The Chrome extension modifies Gmail compose content, detects trackers in received messages, and renders read status in sent/read views.
 - The API Worker handles Google OAuth, session cookies, extension pairing, signed tracking URLs, analytics APIs, queue consumers, and D1 persistence.
-- The dashboard is a Cloudflare Pages site that reads analytics from the API Worker.
+- The dashboard is a Cloudflare Pages site that reads analytics from the API Worker, manages extension tokens, exports CSV events, and stores product settings.
 - Shared TypeScript code keeps event schemas, signing, and detection rules consistent across the API and extension.
 
 ## Data Flow
@@ -25,5 +25,7 @@ Who Read Me is a personal deployment. The owner deploys the repo to Cloudflare, 
 - The first Google account to complete setup owns the deployment.
 - Tracking URLs must be signed and expire only by explicit retention policy.
 - Extension tokens are scoped and revocable.
+- Dashboard cookie mutations must include CSRF protection.
+- Tracking events are deduplicated within the configured window.
 - Received-email tracker detection must never send full email body content to the backend by default.
 - Recipient-level read attribution requires individualized sends. A single email with several recipients cannot reliably identify which recipient opened it.

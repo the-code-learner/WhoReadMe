@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS extension_pairings (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE INDEX IF NOT EXISTS idx_extension_pairings_user ON extension_pairings(user_id, created_at);
+
 CREATE TABLE IF NOT EXISTS messages (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -65,6 +67,7 @@ CREATE TABLE IF NOT EXISTS tracking_events (
   country TEXT,
   colo TEXT,
   is_bot INTEGER NOT NULL DEFAULT 0,
+  confidence TEXT NOT NULL DEFAULT 'low',
   metadata_json TEXT NOT NULL DEFAULT '{}',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -87,4 +90,15 @@ CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value_json TEXT NOT NULL,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS rate_limits (
+  key TEXT PRIMARY KEY,
+  count INTEGER NOT NULL,
+  reset_at TEXT NOT NULL
+);
+
+INSERT OR IGNORE INTO settings (key, value_json) VALUES (
+  'product',
+  '{"retentionDays":365,"dedupeWindowMinutes":15,"trackerWarningsEnabled":true}'
 );

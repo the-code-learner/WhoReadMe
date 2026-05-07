@@ -93,6 +93,12 @@ dl div {
   gap: 16px;
 }
 
+.toolbar {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 dl {
   display: grid;
   gap: 12px;
@@ -129,6 +135,10 @@ input {
   font: inherit;
 }
 
+input[type="checkbox"] {
+  width: auto;
+}
+
 pre {
   white-space: pre-wrap;
   background: #f2f5f8;
@@ -149,6 +159,53 @@ pre {
   display: grid;
   gap: 8px;
   margin-top: 16px;
+}
+
+.tokenList,
+.eventList {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.tokenRow,
+.eventRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.eventRow {
+  align-items: flex-start;
+  flex-direction: column;
+}
+
+.tokenRow span,
+.eventRow span,
+.eventRow small {
+  color: var(--muted);
+}
+
+.settingsForm {
+  align-items: end;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(160px, 1fr));
+  margin-top: 16px;
+}
+
+.settingsForm label {
+  display: grid;
+  gap: 6px;
+  font-weight: 700;
+}
+
+.checkboxLabel {
+  align-items: center;
+  display: flex !important;
 }
 
 .messageRow {
@@ -198,5 +255,15 @@ pre {
   .messageRow {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .toolbar,
+  .tokenRow {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .settingsForm {
+    grid-template-columns: 1fr;
   }
 }

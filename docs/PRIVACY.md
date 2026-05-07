@@ -32,4 +32,4 @@ Dashboard labels should use careful language such as "open event" and "likely re
 
 ## Retention
 
-Retention should be configurable per deployment. The first scaffold stores events indefinitely until retention workflows are implemented.
+Retention is configurable in dashboard settings. The current implementation stores the configured value and uses it as product policy; a scheduled retention Workflow should delete older rows in a later deployment pass.

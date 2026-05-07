@@ -22,12 +22,21 @@ label {
   font-weight: 700;
 }
 
+.check {
+  align-items: center;
+  display: flex;
+}
+
 input,
 textarea {
   border: 1px solid #d9e0e8;
   border-radius: 6px;
   font: inherit;
   padding: 8px;
+}
+
+input[type="checkbox"] {
+  width: auto;
 }
 
 button {
@@ -45,4 +54,3 @@ p {
   margin: 0;
   color: #5f6b7a;
 }
-

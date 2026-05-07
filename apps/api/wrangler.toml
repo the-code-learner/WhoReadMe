@@ -28,3 +28,5 @@ max_batch_timeout = 5
 [ai]
 binding = "AI"
 
+[triggers]
+crons = ["17 3 * * *"]

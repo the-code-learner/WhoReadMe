@@ -1,10 +1,12 @@
 import { detectTrackers, type MessageListItem, type MessageReadSummary, type SendTrackedEmailResponse } from "@who-read-me/shared";
 
 const marker = "data-wrm-instrumented";
+const composeIdAttribute = "data-wrm-compose-id";
 
 setInterval(scanGmail, 1500);
 setInterval(refreshPanel, 10000);
 void refreshPanel();
+new MutationObserver(() => scanGmail()).observe(document.documentElement, { childList: true, subtree: true });
 
 function scanGmail() {
   scanComposeWindows();
@@ -22,6 +24,7 @@ function scanComposeWindows() {
     button.textContent = "Send tracked copies";
     button.addEventListener("click", () => void sendTrackedCopies(body, button));
     body.parentElement?.append(button);
+    addComposeNotice(body);
   }
 }
 
@@ -37,10 +40,11 @@ async function sendTrackedCopies(body: HTMLElement, button: HTMLButtonElement) {
       return;
     }
     const senderEmail = await getSenderEmail();
+    const clientComposeId = getComposeId(body);
     const response = await api<SendTrackedEmailResponse>("/api/gmail/send-tracked", {
       method: "POST",
       body: JSON.stringify({
-        clientComposeId: crypto.randomUUID(),
+        clientComposeId,
         subject: composeRoot?.querySelector<HTMLInputElement>('input[name="subjectbox"]')?.value ?? document.querySelector<HTMLInputElement>('input[name="subjectbox"]')?.value ?? undefined,
         senderEmail,
         html: body.innerHTML,
@@ -67,12 +71,15 @@ function scanReceivedMessages() {
   const messageBodies = document.querySelectorAll<HTMLElement>('div[role="listitem"] div.a3s:not([data-wrm-detected])');
   for (const body of messageBodies) {
     body.setAttribute("data-wrm-detected", "true");
-    const result = detectTrackers(body.innerHTML);
-    if (result.riskLevel === "none") continue;
-    const badge = document.createElement("div");
-    badge.className = `wrm-tracker-warning wrm-risk-${result.riskLevel}`;
-    badge.textContent = `Who Read Me: ${result.findings.length} possible trackers detected`;
-    body.prepend(badge);
+    void chrome.storage.sync.get(["trackerWarningsEnabled"]).then((settings) => {
+      if (settings.trackerWarningsEnabled === false) return;
+      const result = detectTrackers(body.innerHTML);
+      if (result.riskLevel === "none") return;
+      const badge = document.createElement("div");
+      badge.className = `wrm-tracker-warning wrm-risk-${result.riskLevel}`;
+      badge.textContent = `Who Read Me: ${result.findings.length} possible trackers detected`;
+      body.prepend(badge);
+    });
   }
 }
 
@@ -100,8 +107,11 @@ async function refreshPanel() {
   if (!panel) {
     panel = document.createElement("aside");
     panel.id = "wrm-panel";
-    panel.innerHTML = '<div class="wrm-panel-title">Who Read Me</div><div class="wrm-panel-body">Loading...</div>';
+    panel.innerHTML = '<button class="wrm-panel-title" type="button">Who Read Me</button><div class="wrm-panel-body">Loading...</div>';
     document.body.append(panel);
+    panel.querySelector("button")?.addEventListener("click", () => {
+      panel?.classList.toggle("wrm-panel-collapsed");
+    });
   }
   const body = panel.querySelector<HTMLElement>(".wrm-panel-body");
   if (!body) return;
@@ -140,6 +150,24 @@ function collectRecipients(root: HTMLElement | null): Array<{ email: string; dis
     if (value && value.includes("@")) emails.add(value);
   }
   return Array.from(emails).map((email) => ({ email }));
+}
+
+function addComposeNotice(body: HTMLElement) {
+  const root = findComposeRoot(body);
+  if (!root || root.querySelector(".wrm-compose-notice")) return;
+  const notice = document.createElement("div");
+  notice.className = "wrm-compose-notice";
+  notice.textContent = "Use Send tracked copies for tracked mail. Gmail's native Send button will send an untracked message.";
+  body.parentElement?.append(notice);
+}
+
+function getComposeId(body: HTMLElement): string {
+  const root = findComposeRoot(body) ?? body;
+  const existing = root.getAttribute(composeIdAttribute);
+  if (existing) return existing;
+  const next = crypto.randomUUID();
+  root.setAttribute(composeIdAttribute, next);
+  return next;
 }
 
 function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -181,7 +209,8 @@ style.textContent = `
     padding: 7px 10px;
   }
   .wrm-tracker-warning,
-  .wrm-read-summary {
+  .wrm-read-summary,
+  .wrm-compose-notice {
     border: 1px solid #d9e0e8;
     border-radius: 6px;
     background: #f6f8fb;
@@ -211,9 +240,19 @@ style.textContent = `
     font: 12px Arial, sans-serif;
   }
   .wrm-panel-title {
+    width: 100%;
+    border: 0;
     border-bottom: 1px solid #d9e0e8;
+    border-radius: 8px 8px 0 0;
+    background: #ffffff;
+    color: #16202a;
+    cursor: pointer;
     font-weight: 700;
     padding: 10px 12px;
+    text-align: left;
+  }
+  .wrm-panel-collapsed .wrm-panel-body {
+    display: none;
   }
   .wrm-panel-body {
     display: grid;

@@ -44,12 +44,17 @@
           <button id="pairButton" type="button">Create token</button>
         </div>
         <pre id="pairingOutput">Pair the extension after signing in.</pre>
+        <div id="pairingsOutput" class="tokenList"></div>
       </section>
 
       <section class="panel">
         <div class="sectionHeader">
           <h2>Tracked Messages</h2>
-          <button id="refreshButton" type="button">Refresh</button>
+          <div class="toolbar">
+            <input id="searchInput" placeholder="Search messages">
+            <button id="exportButton" type="button">Export CSV</button>
+            <button id="refreshButton" type="button">Refresh</button>
+          </div>
         </div>
         <div id="messagesOutput" class="messageList"></div>
       </section>
@@ -61,6 +66,26 @@
           <button type="submit">Load summary</button>
         </form>
         <div id="summaryOutput" class="summaryGrid"></div>
+        <div id="eventsOutput" class="eventList"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Settings</h2>
+        <form id="settingsForm" class="settingsForm">
+          <label>
+            Retention days
+            <input id="retentionDaysInput" type="number" min="1" max="3650">
+          </label>
+          <label>
+            Dedupe window minutes
+            <input id="dedupeWindowInput" type="number" min="1" max="1440">
+          </label>
+          <label class="checkboxLabel">
+            <input id="trackerWarningsInput" type="checkbox">
+            Tracker warnings enabled
+          </label>
+          <button type="submit">Save settings</button>
+        </form>
       </section>
     </main>
     <script src="/app.js" type="module"></script>

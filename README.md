@@ -10,7 +10,7 @@ This repository contains the first working scaffold:
 
 - Cloudflare Worker API for Google OAuth, sessions, extension pairing, tracking pixels, link redirects, analytics, and extension sync.
 - Static dashboard shell for setup and tracking visibility.
-- Chrome Manifest V3 extension starter for Gmail compose/read instrumentation and tracker detection.
+- Chrome Manifest V3 extension for Gmail tracked sends, read summaries, and tracker detection.
 - Shared TypeScript package for event types, signing helpers, URL helpers, and detection heuristics.
 - D1 migration, Wrangler configs, documentation, and custom non-commercial license.
 
@@ -23,6 +23,7 @@ This repository contains the first working scaffold:
 - Detect likely trackers in received Gmail messages.
 - Use Google OAuth as the single identity system.
 - Keep each deployment autonomous and owned by the first Google account that completes setup.
+- Revoke extension tokens, tune retention/deduplication settings, inspect event timelines, and export CSV analytics.
 
 ## How Tracking Works
 
@@ -90,11 +91,15 @@ The intended public deployment flow is Cloudflare Pages connected to GitHub for 
 
 See [Deployment](docs/DEPLOYMENT.md) for full instructions.
 
+Use [Self-Host Checklist](docs/SELF_HOST_CHECKLIST.md) before relying on a deployment for daily use.
+
 ## Accuracy Limits
 
 Email open tracking is inherently approximate. Gmail image proxying, Apple Mail Privacy Protection, enterprise scanners, bot prefetching, blocked remote images, and forwarded messages can all change what an open event means.
 
 See [Privacy](docs/PRIVACY.md) for details.
+
+See [Security](docs/SECURITY.md) for session, token, CSRF, rate-limit, and secret-storage notes.
 
 ## License
 

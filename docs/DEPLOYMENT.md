@@ -60,6 +60,8 @@ npm run deploy:api
 
 Deploy the dashboard with Cloudflare Pages GitHub integration. Use `apps/web` as the project directory and `dist` as the build output directory.
 
+Before daily use, follow `docs/SELF_HOST_CHECKLIST.md`.
+
 ## Extension
 
 Build the extension:

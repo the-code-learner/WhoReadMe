@@ -3,12 +3,23 @@ const statusText = document.querySelector("#statusText");
 const loginButton = document.querySelector("#loginButton");
 const pairButton = document.querySelector("#pairButton");
 const refreshButton = document.querySelector("#refreshButton");
+const exportButton = document.querySelector("#exportButton");
 const pairingOutput = document.querySelector("#pairingOutput");
+const pairingsOutput = document.querySelector("#pairingsOutput");
 const metricsGrid = document.querySelector("#metricsGrid");
 const messagesOutput = document.querySelector("#messagesOutput");
 const summaryForm = document.querySelector("#summaryForm");
 const messageIdInput = document.querySelector("#messageIdInput");
 const summaryOutput = document.querySelector("#summaryOutput");
+const eventsOutput = document.querySelector("#eventsOutput");
+const searchInput = document.querySelector("#searchInput");
+const settingsForm = document.querySelector("#settingsForm");
+const retentionDaysInput = document.querySelector("#retentionDaysInput");
+const dedupeWindowInput = document.querySelector("#dedupeWindowInput");
+const trackerWarningsInput = document.querySelector("#trackerWarningsInput");
+
+let csrfToken = "";
+let allMessages = [];
 
 const storedApiOrigin = localStorage.getItem("wrm.apiOrigin");
 if (storedApiOrigin) apiOriginInput.value = storedApiOrigin;
@@ -25,15 +36,23 @@ pairButton.addEventListener("click", async () => {
   const response = await fetch(`${apiOrigin()}/api/extension/pair`, {
     method: "POST",
     credentials: "include",
-    headers: { "content-type": "application/json" },
+    headers: mutationHeaders(),
     body: JSON.stringify({ label: "Chrome Extension" })
   });
-  const data = await response.json();
-  pairingOutput.textContent = JSON.stringify(data, null, 2);
+  pairingOutput.textContent = JSON.stringify(await response.json(), null, 2);
+  await loadPairings();
 });
 
 refreshButton.addEventListener("click", () => {
   void loadDashboard();
+});
+
+exportButton.addEventListener("click", () => {
+  location.href = `${apiOrigin()}/api/export/events.csv`;
+});
+
+searchInput.addEventListener("input", () => {
+  renderMessages(filterMessages());
 });
 
 summaryForm.addEventListener("submit", async (event) => {
@@ -41,8 +60,23 @@ summaryForm.addEventListener("submit", async (event) => {
   const messageId = messageIdInput.value.trim();
   if (!messageId) return;
   const response = await fetch(`${apiOrigin()}/api/messages/${messageId}/summary`, { credentials: "include" });
-  const summary = await response.json();
-  renderSummary(summary);
+  renderSummary(await response.json());
+  await loadEvents(messageId);
+});
+
+settingsForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const response = await fetch(`${apiOrigin()}/api/settings`, {
+    method: "POST",
+    credentials: "include",
+    headers: mutationHeaders(),
+    body: JSON.stringify({
+      retentionDays: Number(retentionDaysInput.value),
+      dedupeWindowMinutes: Number(dedupeWindowInput.value),
+      trackerWarningsEnabled: trackerWarningsInput.checked
+    })
+  });
+  renderSettings(await response.json());
 });
 
 checkSession();
@@ -56,15 +90,16 @@ async function checkSession() {
       return;
     }
     const data = await response.json();
+    csrfToken = data.csrfToken ?? "";
     statusText.textContent = `Signed in as ${data.user.email}.`;
     void loadDashboard();
-  } catch (error) {
+  } catch {
     statusText.textContent = "API is not reachable.";
   }
 }
 
 async function loadDashboard() {
-  await Promise.all([loadStats(), loadMessages()]);
+  await Promise.all([loadStats(), loadMessages(), loadPairings(), loadSettings()]);
 }
 
 async function loadStats() {
@@ -77,7 +112,7 @@ async function loadStats() {
       node.textContent = String(values[index] ?? 0);
     });
   } catch {
-    // The session check already reports API connectivity.
+    // The session check reports API connectivity.
   }
 }
 
@@ -89,9 +124,42 @@ async function loadMessages() {
       return;
     }
     const data = await response.json();
-    renderMessages(data.messages ?? []);
+    allMessages = data.messages ?? [];
+    renderMessages(filterMessages());
   } catch {
     messagesOutput.textContent = "Messages are not available.";
+  }
+}
+
+async function loadPairings() {
+  try {
+    const response = await fetch(`${apiOrigin()}/api/extension/pairings`, { credentials: "include" });
+    if (!response.ok) return;
+    const data = await response.json();
+    renderPairings(data.pairings ?? []);
+  } catch {
+    pairingsOutput.textContent = "Pairings are not available.";
+  }
+}
+
+async function loadSettings() {
+  try {
+    const response = await fetch(`${apiOrigin()}/api/settings`, { credentials: "include" });
+    if (!response.ok) return;
+    renderSettings(await response.json());
+  } catch {
+    // Settings are optional during first setup.
+  }
+}
+
+async function loadEvents(messageId) {
+  try {
+    const response = await fetch(`${apiOrigin()}/api/events?messageId=${encodeURIComponent(messageId)}&limit=50`, { credentials: "include" });
+    if (!response.ok) return;
+    const data = await response.json();
+    renderEvents(data.events ?? []);
+  } catch {
+    eventsOutput.textContent = "Events are not available.";
   }
 }
 
@@ -113,6 +181,58 @@ function renderSummary(summary) {
   }
 }
 
+function renderEvents(events) {
+  eventsOutput.innerHTML = "";
+  if (!events.length) {
+    eventsOutput.textContent = "No events for this message yet.";
+    return;
+  }
+  for (const event of events) {
+    const row = document.createElement("article");
+    row.className = "eventRow";
+    row.innerHTML = `
+      <strong>${escapeHtml(event.eventType)}</strong>
+      <span>${escapeHtml(event.createdAt)} - ${event.isBot ? "automated" : "likely human"} - ${escapeHtml(event.confidence)}</span>
+      <small>${escapeHtml(event.country || "unknown country")} - ${escapeHtml(event.userAgent || "no user agent")}</small>
+    `;
+    eventsOutput.append(row);
+  }
+}
+
+function renderPairings(pairings) {
+  pairingsOutput.innerHTML = "";
+  if (!pairings.length) {
+    pairingsOutput.textContent = "No extension tokens created yet.";
+    return;
+  }
+  for (const pairing of pairings) {
+    const row = document.createElement("article");
+    row.className = "tokenRow";
+    row.innerHTML = `
+      <span>
+        <strong>${escapeHtml(pairing.label)}</strong>
+        <small>${escapeHtml(pairing.createdAt)}${pairing.revokedAt ? ` - revoked ${escapeHtml(pairing.revokedAt)}` : ""}</small>
+      </span>
+      <button type="button" ${pairing.revokedAt ? "disabled" : ""}>Revoke</button>
+    `;
+    row.querySelector("button").addEventListener("click", async () => {
+      await fetch(`${apiOrigin()}/api/extension/pairings/${encodeURIComponent(pairing.id)}`, {
+        method: "DELETE",
+        credentials: "include",
+        headers: mutationHeaders()
+      });
+      await loadPairings();
+    });
+    pairingsOutput.append(row);
+  }
+}
+
+function renderSettings(settings) {
+  retentionDaysInput.value = String(settings.retentionDays ?? 365);
+  dedupeWindowInput.value = String(settings.dedupeWindowMinutes ?? 15);
+  trackerWarningsInput.checked = Boolean(settings.trackerWarningsEnabled ?? true);
+}
+
 function renderMessages(messages) {
   messagesOutput.innerHTML = "";
   if (!messages.length) {
@@ -126,9 +246,9 @@ function renderMessages(messages) {
     item.innerHTML = `
       <span>
         <strong>${escapeHtml(message.subject || "No subject")}</strong>
-        <small>${escapeHtml(message.id)} · ${Number(message.recipientCount)} recipients · ${escapeHtml(message.status)}</small>
+        <small>${escapeHtml(message.id)} - ${Number(message.recipientCount)} recipients - ${escapeHtml(message.status)}</small>
       </span>
-      <span>${Number(message.totalOpens)} opens · ${Number(message.totalClicks)} clicks</span>
+      <span>${Number(message.totalOpens)} opens - ${Number(message.totalClicks)} clicks</span>
     `;
     item.addEventListener("click", () => {
       messageIdInput.value = message.id;
@@ -138,8 +258,21 @@ function renderMessages(messages) {
   }
 }
 
+function filterMessages() {
+  const query = searchInput.value.trim().toLowerCase();
+  if (!query) return allMessages;
+  return allMessages.filter((message) => [message.id, message.subject, message.senderEmail, message.status].some((value) => String(value ?? "").toLowerCase().includes(query)));
+}
+
 function apiOrigin() {
   return apiOriginInput.value.replace(/\/$/, "");
+}
+
+function mutationHeaders() {
+  return {
+    "content-type": "application/json",
+    "x-wrm-csrf": csrfToken
+  };
 }
 
 function escapeHtml(value) {
