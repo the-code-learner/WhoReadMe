@@ -25,6 +25,9 @@ queue = "who-read-me-events"
 max_batch_size = 10
 max_batch_timeout = 5
 
+[[send_email]]
+name = "AUTH_EMAIL"
+
 [ai]
 binding = "AI"
 

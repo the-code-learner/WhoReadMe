@@ -16,6 +16,8 @@ Tracking events may include:
 
 The extension should not upload full received email bodies for tracker detection. Local deterministic rules run first.
 
+Owner emails, sender emails, recipient emails, Cloudflare account identifiers, and local machine paths must not be committed to the repository. Keep deployment-specific identity data in Cloudflare configuration, Worker secrets, D1, or local ignored files.
+
 ## Accuracy Limits
 
 Open tracking does not prove that a human read an email. Common distortions include:

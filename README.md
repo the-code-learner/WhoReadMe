@@ -2,13 +2,13 @@
 
 Who Read Me is a self-hostable email tracking and tracker-detection product for Gmail. It combines a Chrome extension with Cloudflare infrastructure so an individual user can deploy their own private instance.
 
-The project is designed around Cloudflare Pages, Workers, D1, R2, Queues, Workflows, Workers AI, and GitHub-connected deployments. Google OAuth is used both for Gmail linking and dashboard access.
+The project is designed around Cloudflare Pages, Workers, D1, R2, Queues, Workflows, Workers AI, Cloudflare email sending, and GitHub-connected deployments. Dashboard access is owned by one deployment email using one-time links or codes; Google OAuth is used only to link Gmail sending.
 
 ## Current Status
 
 This repository contains the first working scaffold:
 
-- Cloudflare Worker API for Google OAuth, sessions, extension pairing, tracking pixels, link redirects, analytics, and extension sync.
+- Cloudflare Worker API for owner email auth, Google Gmail linking, sessions, extension pairing, tracking pixels, link redirects, analytics, and extension sync.
 - Static dashboard shell for setup and tracking visibility.
 - Chrome Manifest V3 extension for Gmail tracked sends, read summaries, and tracker detection.
 - Shared TypeScript package for event types, signing helpers, URL helpers, and detection heuristics.
@@ -21,8 +21,9 @@ This repository contains the first working scaffold:
 - Track link clicks with signed redirect URLs.
 - Show read count and recipient-level reader status in Gmail.
 - Detect likely trackers in received Gmail messages.
-- Use Google OAuth as the single identity system.
-- Keep each deployment autonomous and owned by the first Google account that completes setup.
+- Accept one owner email per deployment for dashboard access.
+- Send one-time access links and codes to the owner email.
+- Keep Gmail linking separate from dashboard access.
 - Revoke extension tokens, tune retention/deduplication settings, inspect event timelines, and export CSV analytics.
 
 ## How Tracking Works
@@ -51,16 +52,22 @@ Who Read Me does not try to identify recipients from one multi-recipient email. 
    npx wrangler queues create who-read-me-events
    ```
 
-4. Copy the generated resource IDs into `apps/api/wrangler.toml`.
+4. Keep the generated D1 ID outside the repository. Put it in a local shell variable or private CI secret named `WRM_D1_DATABASE_ID`.
 
-5. Create Google OAuth credentials for a web application. Enable Gmail API and include these OAuth scopes:
+5. Enable Cloudflare email sending for the Worker and set the owner-auth sender outside the repository:
+
+   ```bash
+   npx wrangler secret put AUTH_EMAIL_FROM --config apps/api/wrangler.toml
+   ```
+
+6. Create Google OAuth credentials for a web application. Enable Gmail API and include these OAuth scopes:
 
    - `openid`
    - `email`
    - `profile`
    - `https://www.googleapis.com/auth/gmail.send`
 
-6. Set these Worker secrets:
+7. Set these Worker secrets:
 
    ```bash
    npx wrangler secret put GOOGLE_CLIENT_ID --config apps/api/wrangler.toml
@@ -68,22 +75,24 @@ Who Read Me does not try to identify recipients from one multi-recipient email. 
    npx wrangler secret put SESSION_SECRET --config apps/api/wrangler.toml
    ```
 
-7. Apply D1 migrations:
+8. Set deployment-only values in your shell or CI secret store, then apply D1 migrations. The helper expects `WRM_D1_DATABASE_ID`, `WRM_APP_ORIGIN`, and `WRM_API_ORIGIN`:
 
    ```bash
-   npx wrangler d1 migrations apply who-read-me --config apps/api/wrangler.toml
+   npm run migrate:api
    ```
 
-8. Deploy the API Worker and dashboard:
+9. Deploy the API Worker and dashboard. For the dashboard build, set `API_ORIGIN` in the shell or Pages build environment:
 
    ```bash
    npm run deploy:api
-   npm run build:web
+   npm run deploy:web
    ```
 
-9. Load `apps/extension/dist` as an unpacked Chrome extension.
+10. Protect the Pages hostname with Cloudflare Access one-time PIN and an allow policy for the same owner email.
 
-10. Sign in to the dashboard, create an extension token, paste it into the extension popup, and set your sender email.
+11. Load `apps/extension/dist` as an unpacked Chrome extension.
+
+12. Sign in to the dashboard by email, link Gmail, create an extension token, paste it into the extension popup, and set your sender email.
 
 ## Deployment Model
 

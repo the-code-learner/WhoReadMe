@@ -1,7 +1,6 @@
-name = "who-read-me"
+name = "whoreadme"
 pages_build_output_dir = "dist"
 compatibility_date = "2026-04-23"
 
 [vars]
 API_ORIGIN = "http://localhost:8787"
-

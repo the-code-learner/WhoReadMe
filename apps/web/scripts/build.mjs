@@ -1,4 +1,4 @@
-import { cp, mkdir, rm } from "node:fs/promises";
+import { cp, mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -8,3 +8,8 @@ await rm(dist, { recursive: true, force: true });
 await mkdir(dist, { recursive: true });
 await cp(resolve(root, "src"), dist, { recursive: true });
 
+const apiOrigin = process.env.API_ORIGIN || "http://localhost:8787";
+await writeFile(
+  resolve(dist, "config.js"),
+  `window.WRM_CONFIG = ${JSON.stringify({ apiOrigin })};\n`
+);

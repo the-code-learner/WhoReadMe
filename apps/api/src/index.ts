@@ -22,8 +22,11 @@ interface Env {
   ARTIFACTS: R2Bucket;
   EVENT_QUEUE: Queue<QueuedTrackingEvent>;
   AI: Ai;
+  AUTH_EMAIL?: SendEmail;
   APP_ORIGIN: string;
   API_ORIGIN: string;
+  AUTH_EMAIL_FROM?: string;
+  AUTH_DEBUG_LINKS?: string;
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
   SESSION_SECRET: string;
@@ -50,6 +53,19 @@ interface AuthContext {
   csrfToken?: string;
 }
 
+interface OwnerRow {
+  id: string;
+  email: string;
+  name?: string;
+}
+
+interface AuthChallengeRow {
+  id: string;
+  user_id?: string | null;
+  email: string;
+  next_url?: string | null;
+}
+
 const pixel = Uint8Array.from([71, 73, 70, 56, 57, 97, 1, 0, 1, 0, 128, 0, 0, 255, 255, 255, 0, 0, 0, 33, 249, 4, 1, 0, 0, 0, 0, 44, 0, 0, 0, 0, 1, 0, 1, 0, 0, 2, 2, 68, 1, 0, 59]);
 
 export default {
@@ -58,7 +74,11 @@ export default {
 
     if (request.method === "OPTIONS") return withSecurityHeaders(cors(null, env));
     if (url.pathname === "/health") return withSecurityHeaders(json({ ok: true }, env));
-    if (url.pathname === "/auth/google/start") return startGoogleAuth(url, env);
+    if (url.pathname === "/auth/status") return authStatus(env);
+    if (url.pathname === "/auth/email/start" && request.method === "POST") return startEmailAuth(request, env);
+    if (url.pathname === "/auth/email/verify" && request.method === "GET") return verifyEmailLink(request, url, env);
+    if (url.pathname === "/auth/email/verify" && request.method === "POST") return verifyEmailOtp(request, env);
+    if (url.pathname === "/auth/google/start") return startGoogleAuth(request, url, env);
     if (url.pathname === "/auth/google/callback") return finishGoogleAuth(request, env);
     if (url.pathname === "/auth/logout") return logout(env);
     if (url.pathname === "/track/open.gif") return trackOpen(request, env);
@@ -68,7 +88,7 @@ export default {
     if (!auth) return json({ error: "Authentication required" }, env, 401);
     if (!await authorizeMutation(request, env, auth)) return json({ error: "Invalid CSRF token" }, env, 403);
 
-    if (url.pathname === "/api/me") return json({ user: auth.user, csrfToken: auth.csrfToken }, env);
+    if (url.pathname === "/api/me") return me(env, auth);
     if (url.pathname === "/api/dashboard/stats") return dashboardStats(env, auth.user.id);
     if (url.pathname === "/api/messages") return listMessages(env, auth.user.id);
     if (url.pathname === "/api/events") return listEvents(url, env, auth.user.id);
@@ -98,10 +118,92 @@ export default {
   }
 };
 
-async function startGoogleAuth(url: URL, env: Env): Promise<Response> {
+async function authStatus(env: Env): Promise<Response> {
+  return json({ ownerConfigured: Boolean(await readOwner(env)) }, env);
+}
+
+async function startEmailAuth(request: Request, env: Env): Promise<Response> {
+  if (!await allowRate(request, env, "auth-start", 8)) return json({ error: "Too many access requests" }, env, 429);
+
+  const body = await request.json<{ email?: string; next?: string }>().catch((): { email?: string; next?: string } => ({}));
+  const email = normalizeEmail(body.email);
+  if (!email) return json({ error: "A valid email address is required" }, env, 400);
+
+  await deleteExpiredAuthChallenges(env);
+  const owner = await readOwner(env);
+  if (owner && owner.email !== email) return json({ ok: true, emailSent: true }, env);
+
+  const token = createId("auth");
+  const code = createOtp();
+  const challengeId = createId("chg");
+  const expiresAt = new Date(Date.now() + 1000 * 60 * 10).toISOString();
+  const next = sanitizeNextUrl(body.next, env);
+  await env.DB.prepare(
+    "INSERT INTO auth_challenges (id, user_id, email, token_hash, otp_hash, next_url, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+  ).bind(
+    challengeId,
+    owner?.id ?? null,
+    email,
+    await cryptoHash(token),
+    await otpHash(env, email, code),
+    next,
+    expiresAt
+  ).run();
+
+  const link = `${env.API_ORIGIN}/auth/email/verify?token=${encodeURIComponent(token)}`;
+  try {
+    await sendAuthEmail(env, email, link, code);
+  } catch {
+    await env.DB.prepare("DELETE FROM auth_challenges WHERE id = ?").bind(challengeId).run();
+    return json({ error: "Access email delivery is not configured" }, env, 503);
+  }
+  const debugLink = shouldExposeDebugAuthLink(env) ? link : undefined;
+  return json({ ok: true, emailSent: true, debugLink }, env);
+}
+
+async function verifyEmailLink(request: Request, url: URL, env: Env): Promise<Response> {
+  if (!await allowRate(request, env, "auth-verify", 20)) return json({ error: "Too many verification attempts" }, env, 429);
+  const token = url.searchParams.get("token");
+  if (!token) return json({ error: "Missing access token" }, env, 400);
+  const challenge = await env.DB.prepare(
+    "SELECT id, user_id, email, next_url FROM auth_challenges WHERE token_hash = ? AND consumed_at IS NULL AND expires_at > CURRENT_TIMESTAMP LIMIT 1"
+  ).bind(await cryptoHash(token)).first<AuthChallengeRow>();
+  if (!challenge) return json({ error: "Invalid or expired access link" }, env, 400);
+  const session = await consumeAuthChallenge(env, challenge);
+  if (!session) return json({ error: "This deployment already has a different owner" }, env, 403);
+  return createSessionRedirect(env, session.userId, session.nextUrl);
+}
+
+async function verifyEmailOtp(request: Request, env: Env): Promise<Response> {
+  if (!await allowRate(request, env, "auth-verify", 20)) return json({ error: "Too many verification attempts" }, env, 429);
+  const body = await request.json<{ email?: string; code?: string }>().catch((): { email?: string; code?: string } => ({}));
+  const email = normalizeEmail(body.email);
+  const code = normalizeOtp(body.code);
+  if (!email || !code) return json({ error: "Email and one-time code are required" }, env, 400);
+
+  const challenge = await env.DB.prepare(
+    `SELECT id, user_id, email, next_url
+    FROM auth_challenges
+    WHERE email = ? AND otp_hash = ? AND consumed_at IS NULL AND expires_at > CURRENT_TIMESTAMP
+    ORDER BY created_at DESC
+    LIMIT 1`
+  ).bind(email, await otpHash(env, email, code)).first<AuthChallengeRow>();
+  if (!challenge) return json({ error: "Invalid or expired one-time code" }, env, 400);
+
+  const session = await consumeAuthChallenge(env, challenge);
+  if (!session) return json({ error: "This deployment already has a different owner" }, env, 403);
+  const csrfToken = await createSession(env, session.userId);
+  const user = await env.DB.prepare("SELECT id, email, name FROM users WHERE id = ?").bind(session.userId).first<OwnerRow>();
+  return json({ ok: true, user, csrfToken: csrfToken.csrfToken }, env, 200, csrfToken.cookie);
+}
+
+async function startGoogleAuth(request: Request, url: URL, env: Env): Promise<Response> {
+  const auth = await authenticate(request, env);
+  if (!auth || auth.kind !== "cookie") return json({ error: "Email sign-in is required before linking Gmail" }, env, 401);
   const state = await signedQuery(env.SESSION_SECRET, {
     nonce: createId("state"),
-    next: url.searchParams.get("next") ?? env.APP_ORIGIN
+    next: sanitizeNextUrl(url.searchParams.get("next"), env),
+    userId: auth.user.id
   });
   const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   authUrl.search = new URLSearchParams({
@@ -120,6 +222,8 @@ async function finishGoogleAuth(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const state = new URLSearchParams(url.searchParams.get("state") ?? "");
   if (!(await verifySignedQuery(env.SESSION_SECRET, state))) return json({ error: "Invalid OAuth state" }, env, 400);
+  const userId = state.get("userId");
+  if (!userId) return json({ error: "Invalid OAuth state" }, env, 400);
 
   const code = url.searchParams.get("code");
   if (!code) return json({ error: "Missing OAuth code" }, env, 400);
@@ -139,34 +243,118 @@ async function finishGoogleAuth(request: Request, env: Env): Promise<Response> {
   const token = await tokenResponse.json<{ id_token: string; refresh_token?: string }>();
   const profile = parseJwt<{ sub: string; email: string; name?: string; picture?: string }>(token.id_token);
 
-  const existingOwner = await env.DB.prepare("SELECT id, google_sub FROM users WHERE role = 'owner' LIMIT 1").first<{ id: string; google_sub: string }>();
-  if (existingOwner && existingOwner.google_sub !== profile.sub) return json({ error: "This deployment already has an owner" }, env, 403);
+  const owner = await env.DB.prepare("SELECT id FROM users WHERE id = ? AND role = 'owner'").bind(userId).first<{ id: string }>();
+  if (!owner) return json({ error: "Email sign-in is required before linking Gmail" }, env, 403);
 
-  const userId = existingOwner?.id ?? createId("usr");
+  const conflictingGoogleAccount = await env.DB.prepare("SELECT id FROM users WHERE google_sub = ? AND id != ? LIMIT 1")
+    .bind(profile.sub, userId)
+    .first<{ id: string }>();
+  if (conflictingGoogleAccount) return json({ error: "This Google account is linked to another user" }, env, 409);
+
   await env.DB.prepare(
-    `INSERT INTO users (id, google_sub, email, name, avatar_url, gmail_refresh_token, role)
-    VALUES (?, ?, ?, ?, ?, ?, 'owner')
-    ON CONFLICT(google_sub) DO UPDATE SET
-      email = excluded.email,
-      name = excluded.name,
-      avatar_url = excluded.avatar_url,
-      gmail_refresh_token = COALESCE(excluded.gmail_refresh_token, users.gmail_refresh_token),
-      updated_at = CURRENT_TIMESTAMP`
-  ).bind(userId, profile.sub, profile.email, profile.name ?? null, profile.picture ?? null, token.refresh_token ? await encryptSecret(env, token.refresh_token) : null).run();
+    `UPDATE users
+    SET google_sub = ?,
+      google_email = ?,
+      name = COALESCE(name, ?),
+      avatar_url = ?,
+      gmail_refresh_token = COALESCE(?, gmail_refresh_token),
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?`
+  ).bind(
+    profile.sub,
+    normalizeEmail(profile.email),
+    profile.name ?? null,
+    profile.picture ?? null,
+    token.refresh_token ? await encryptSecret(env, token.refresh_token) : null,
+    userId
+  ).run();
 
+  return createSessionRedirect(env, userId, sanitizeNextUrl(state.get("next"), env));
+}
+
+async function me(env: Env, auth: AuthContext): Promise<Response> {
+  const row = await env.DB.prepare(
+    "SELECT CASE WHEN gmail_refresh_token IS NOT NULL THEN 1 ELSE 0 END gmailLinked FROM users WHERE id = ?"
+  ).bind(auth.user.id).first<{ gmailLinked: number }>();
+  return json({ user: auth.user, csrfToken: auth.csrfToken, gmailLinked: Boolean(row?.gmailLinked) }, env);
+}
+
+async function readOwner(env: Env): Promise<OwnerRow | null> {
+  return env.DB.prepare("SELECT id, email, name FROM users WHERE role = 'owner' ORDER BY created_at ASC LIMIT 1").first<OwnerRow>();
+}
+
+async function consumeAuthChallenge(env: Env, challenge: AuthChallengeRow): Promise<{ userId: string; nextUrl: string } | null> {
+  let userId = challenge.user_id ?? undefined;
+  const owner = await readOwner(env);
+  if (userId && owner && owner.id !== userId) return null;
+  if (!userId) {
+    if (owner && owner.email !== challenge.email) return null;
+    userId = owner?.id ?? createId("usr");
+    if (!owner) {
+      try {
+        await env.DB.prepare("INSERT INTO users (id, email, role) VALUES (?, ?, 'owner')").bind(userId, challenge.email).run();
+      } catch {
+        const createdOwner = await readOwner(env);
+        if (!createdOwner || createdOwner.email !== challenge.email) return null;
+        userId = createdOwner.id;
+      }
+    }
+  }
+
+  await env.DB.prepare("UPDATE auth_challenges SET consumed_at = CURRENT_TIMESTAMP, user_id = ? WHERE id = ?")
+    .bind(userId, challenge.id)
+    .run();
+  return { userId, nextUrl: sanitizeNextUrl(challenge.next_url, env) };
+}
+
+async function createSession(env: Env, userId: string): Promise<{ cookie: string; csrfToken: string }> {
   const sessionId = createId("ses");
   const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString();
   await env.DB.prepare("INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)").bind(sessionId, userId, expiresAt).run();
   const sessionSig = await signSession(env, sessionId);
-  const next = state.get("next") ?? env.APP_ORIGIN;
+  return {
+    cookie: cookie("wrm_session", `${sessionId}.${sessionSig}`, { maxAge: 60 * 60 * 24 * 30 }),
+    csrfToken: await hmacSign(env.SESSION_SECRET, `${sessionId}.csrf`)
+  };
+}
+
+async function createSessionRedirect(env: Env, userId: string, next: string): Promise<Response> {
+  const session = await createSession(env, userId);
   return new Response(null, {
     status: 302,
     headers: {
-      location: next,
-      "set-cookie": cookie("wrm_session", `${sessionId}.${sessionSig}`, { maxAge: 60 * 60 * 24 * 30 }),
-      ...corsHeaders(env)
+      location: sanitizeNextUrl(next, env),
+      "set-cookie": session.cookie,
+      ...corsHeaders(env),
+      ...securityHeaders()
     }
   });
+}
+
+async function deleteExpiredAuthChallenges(env: Env): Promise<void> {
+  await env.DB.prepare("DELETE FROM auth_challenges WHERE expires_at <= CURRENT_TIMESTAMP OR consumed_at < datetime('now', '-1 day')").run();
+}
+
+async function sendAuthEmail(env: Env, email: string, link: string, code: string): Promise<void> {
+  if (shouldExposeDebugAuthLink(env) && (!env.AUTH_EMAIL || !env.AUTH_EMAIL_FROM)) return;
+  if (!env.AUTH_EMAIL || !env.AUTH_EMAIL_FROM) throw new Error("Auth email binding is not configured");
+
+  const subject = "Your Who Read Me access link";
+  const text = [
+    "Use this one-time link to access your Who Read Me dashboard:",
+    link,
+    "",
+    `One-time code: ${code}`,
+    "",
+    "The link and code expire in 10 minutes. If you did not request this, ignore this email."
+  ].join("\n");
+  const html = [
+    "<p>Use this one-time link to access your Who Read Me dashboard:</p>",
+    `<p><a href="${escapeAttribute(link)}">Open Who Read Me</a></p>`,
+    `<p>One-time code: <strong>${escapeHtmlText(code)}</strong></p>`,
+    "<p>The link and code expire in 10 minutes. If you did not request this, ignore this email.</p>"
+  ].join("");
+  await env.AUTH_EMAIL.send({ from: env.AUTH_EMAIL_FROM, to: email, subject, text, html });
 }
 
 async function pairExtension(request: Request, env: Env, userId: string): Promise<Response> {
@@ -519,6 +707,48 @@ async function cryptoHash(value: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+async function otpHash(env: Env, email: string, code: string): Promise<string> {
+  return hmacSign(env.SESSION_SECRET, `otp:${email}:${code}`);
+}
+
+function createOtp(): string {
+  const bytes = new Uint8Array(4);
+  crypto.getRandomValues(bytes);
+  const value = new DataView(bytes.buffer).getUint32(0) % 1_000_000;
+  return String(value).padStart(6, "0");
+}
+
+function normalizeOtp(value: string | undefined): string | null {
+  const code = value?.replace(/\D/g, "") ?? "";
+  return code.length === 6 ? code : null;
+}
+
+function normalizeEmail(value: string | undefined): string | null {
+  const email = value?.trim().toLowerCase() ?? "";
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return null;
+  return email;
+}
+
+function sanitizeNextUrl(value: string | null | undefined, env: Env): string {
+  try {
+    const appOrigin = new URL(env.APP_ORIGIN);
+    const next = value ? new URL(value, appOrigin) : appOrigin;
+    return next.origin === appOrigin.origin ? next.toString() : appOrigin.toString();
+  } catch {
+    return env.APP_ORIGIN;
+  }
+}
+
+function shouldExposeDebugAuthLink(env: Env): boolean {
+  if (env.AUTH_DEBUG_LINKS !== "1") return false;
+  try {
+    const host = new URL(env.APP_ORIGIN).hostname;
+    return host === "localhost" || host === "127.0.0.1" || host === "::1";
+  } catch {
+    return false;
+  }
+}
+
 function parseJwt<T>(jwt: string): T {
   const [, payload] = jwt.split(".");
   const normalized = payload.replaceAll("-", "+").replaceAll("_", "/");
@@ -532,8 +762,10 @@ function required(url: URL, key: string): string {
   return value;
 }
 
-function json(body: unknown, env: Env, status = 200): Response {
-  return cors(Response.json(body, { status }), env);
+function json(body: unknown, env: Env, status = 200, setCookie?: string): Response {
+  const response = Response.json(body, { status });
+  if (setCookie) response.headers.set("set-cookie", setCookie);
+  return cors(response, env);
 }
 
 function cors(response: Response | null, env: Env, status = 204): Response {
@@ -548,13 +780,13 @@ function corsHeaders(env: Env): Record<string, string> {
   return {
     "access-control-allow-origin": env.APP_ORIGIN,
     "access-control-allow-credentials": "true",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-methods": "GET,POST,DELETE,OPTIONS",
     "access-control-allow-headers": "content-type,authorization"
   };
 }
 
 function cookie(name: string, value: string, options: { maxAge: number }): string {
-  return `${name}=${value}; Max-Age=${options.maxAge}; Path=/; HttpOnly; Secure; SameSite=Lax`;
+  return `${name}=${value}; Max-Age=${options.maxAge}; Path=/; HttpOnly; Secure; SameSite=None`;
 }
 
 function readCookie(request: Request, name: string): string | undefined {
@@ -567,7 +799,7 @@ function logout(env: Env): Response {
     status: 302,
     headers: {
       location: env.APP_ORIGIN,
-      "set-cookie": "wrm_session=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax",
+      "set-cookie": "wrm_session=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=None",
       ...corsHeaders(env)
     }
   });
@@ -755,6 +987,10 @@ function stripHtml(html: string): string {
 
 function escapeAttribute(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");
+}
+
+function escapeHtmlText(value: string): string {
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
 
 function base64Url(bytes: Uint8Array): string {

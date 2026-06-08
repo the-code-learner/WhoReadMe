@@ -4,7 +4,7 @@ The first extension target is Gmail in Chrome using Manifest V3.
 
 ## Responsibilities
 
-- Pair with the owner deployment after Google sign-in.
+- Pair with the owner deployment after email sign-in and Gmail linking.
 - Detect Gmail compose windows.
 - Ask the API to send individualized tracked copies through Gmail API.
 - Avoid Gmail's native send button for tracked messages when there is more than one recipient, because one multi-recipient email cannot provide reliable per-recipient open attribution.

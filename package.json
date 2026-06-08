@@ -18,7 +18,10 @@
     "test:api": "npm run test --workspace @who-read-me/api",
     "test:extension": "npm run test --workspace @who-read-me/extension",
     "test:shared": "npm run test --workspace @who-read-me/shared",
-    "deploy:api": "npm run deploy --workspace @who-read-me/api",
+    "privacy:scan": "node scripts/privacy-scan.mjs",
+    "migrate:api": "node scripts/migrate-api.mjs",
+    "deploy:api": "node scripts/deploy-api.mjs",
+    "deploy:web": "npm run deploy --workspace @who-read-me/web",
     "dev:api": "npm run dev --workspace @who-read-me/api",
     "dev:web": "npm run dev --workspace @who-read-me/web"
   },

@@ -99,6 +99,17 @@ dl div {
   justify-content: flex-end;
 }
 
+.accessControls {
+  display: grid;
+  gap: 8px;
+}
+
+.inlineForm {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 dl {
   display: grid;
   gap: 12px;
@@ -125,6 +136,11 @@ button {
 
 button:hover {
   background: var(--accent-dark);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 input {

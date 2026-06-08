@@ -13,7 +13,7 @@
           <h1>Who Read Me</h1>
           <p>Self-hosted Gmail tracking and tracker detection on Cloudflare.</p>
         </div>
-        <button id="loginButton" type="button">Sign in with Google</button>
+        <button id="gmailLinkButton" type="button" disabled>Link Gmail</button>
       </header>
 
       <section class="panel">
@@ -22,6 +22,19 @@
           <div>
             <dt>Status</dt>
             <dd id="statusText">Checking session...</dd>
+          </div>
+          <div>
+            <dt>Access</dt>
+            <dd class="accessControls">
+              <form id="accessForm" class="inlineForm">
+                <input id="authEmailInput" type="email" placeholder="Owner email" autocomplete="email">
+                <button id="requestAccessButton" type="submit">Send link</button>
+              </form>
+              <form id="codeForm" class="inlineForm">
+                <input id="authCodeInput" inputmode="numeric" maxlength="6" placeholder="One-time code" autocomplete="one-time-code">
+                <button id="verifyAccessButton" type="submit">Verify</button>
+              </form>
+            </dd>
           </div>
           <div>
             <dt>API origin</dt>
@@ -88,6 +101,7 @@
         </form>
       </section>
     </main>
+    <script src="/config.js"></script>
     <script src="/app.js" type="module"></script>
   </body>
 </html>

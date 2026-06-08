@@ -1,6 +1,12 @@
 const apiOriginInput = document.querySelector("#apiOriginInput");
 const statusText = document.querySelector("#statusText");
-const loginButton = document.querySelector("#loginButton");
+const gmailLinkButton = document.querySelector("#gmailLinkButton");
+const accessForm = document.querySelector("#accessForm");
+const codeForm = document.querySelector("#codeForm");
+const authEmailInput = document.querySelector("#authEmailInput");
+const authCodeInput = document.querySelector("#authCodeInput");
+const requestAccessButton = document.querySelector("#requestAccessButton");
+const verifyAccessButton = document.querySelector("#verifyAccessButton");
 const pairButton = document.querySelector("#pairButton");
 const refreshButton = document.querySelector("#refreshButton");
 const exportButton = document.querySelector("#exportButton");
@@ -21,15 +27,74 @@ const trackerWarningsInput = document.querySelector("#trackerWarningsInput");
 let csrfToken = "";
 let allMessages = [];
 
+const configuredApiOrigin = window.WRM_CONFIG?.apiOrigin ?? "http://localhost:8787";
+apiOriginInput.value = configuredApiOrigin;
 const storedApiOrigin = localStorage.getItem("wrm.apiOrigin");
 if (storedApiOrigin) apiOriginInput.value = storedApiOrigin;
 
 apiOriginInput.addEventListener("change", () => {
   localStorage.setItem("wrm.apiOrigin", apiOriginInput.value);
+  void checkSession();
 });
 
-loginButton.addEventListener("click", () => {
+gmailLinkButton.addEventListener("click", () => {
   location.href = `${apiOrigin()}/auth/google/start?next=${encodeURIComponent(location.href)}`;
+});
+
+accessForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const email = authEmailInput.value.trim();
+  if (!email) return;
+  requestAccessButton.disabled = true;
+  statusText.textContent = "Sending access email...";
+  try {
+    const response = await fetch(`${apiOrigin()}/auth/email/start`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email, next: location.href })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      statusText.textContent = data.error ?? "Access email could not be sent.";
+      return;
+    }
+    statusText.textContent = data.debugLink ? `Development access link: ${data.debugLink}` : "Access email sent.";
+  } catch {
+    statusText.textContent = "API is not reachable.";
+  } finally {
+    requestAccessButton.disabled = false;
+  }
+});
+
+codeForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const email = authEmailInput.value.trim();
+  const code = authCodeInput.value.trim();
+  if (!email || !code) return;
+  verifyAccessButton.disabled = true;
+  statusText.textContent = "Verifying code...";
+  try {
+    const response = await fetch(`${apiOrigin()}/auth/email/verify`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email, code })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      statusText.textContent = data.error ?? "Code could not be verified.";
+      return;
+    }
+    csrfToken = data.csrfToken ?? "";
+    statusText.textContent = `Signed in as ${data.user.email}.`;
+    gmailLinkButton.disabled = false;
+    void loadDashboard();
+  } catch {
+    statusText.textContent = "API is not reachable.";
+  } finally {
+    verifyAccessButton.disabled = false;
+  }
 });
 
 pairButton.addEventListener("click", async () => {
@@ -79,22 +144,25 @@ settingsForm.addEventListener("submit", async (event) => {
   renderSettings(await response.json());
 });
 
-checkSession();
-void loadDashboard();
+void checkSession();
 
 async function checkSession() {
   try {
     const response = await fetch(`${apiOrigin()}/api/me`, { credentials: "include" });
     if (!response.ok) {
       statusText.textContent = "Not signed in.";
+      gmailLinkButton.disabled = true;
       return;
     }
     const data = await response.json();
     csrfToken = data.csrfToken ?? "";
-    statusText.textContent = `Signed in as ${data.user.email}.`;
+    statusText.textContent = `Signed in as ${data.user.email}. ${data.gmailLinked ? "Gmail linked." : "Gmail not linked."}`;
+    gmailLinkButton.disabled = false;
+    gmailLinkButton.textContent = data.gmailLinked ? "Relink Gmail" : "Link Gmail";
     void loadDashboard();
   } catch {
     statusText.textContent = "API is not reachable.";
+    gmailLinkButton.disabled = true;
   }
 }
 
